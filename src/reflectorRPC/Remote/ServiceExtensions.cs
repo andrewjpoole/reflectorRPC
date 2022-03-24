@@ -7,7 +7,7 @@ namespace reflectorRPC.Remote
         public static IServiceCollection AddGenericRpcEndpoint(this IServiceCollection services)
         {
             services.AddSingleton<IGenericRpcEndpoint>(new GenericRpcEndpoint(services));
-            
+
             return services;
         }
     }

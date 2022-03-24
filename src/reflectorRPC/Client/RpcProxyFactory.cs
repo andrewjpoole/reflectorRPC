@@ -1,26 +1,34 @@
 ﻿using System.Dynamic;
 using System.Reflection;
 using ImpromptuInterface;
+using reflectorRPC.Caching;
 using reflectorRPC.Shared;
 
 namespace reflectorRPC.Client
 {
-    public class RcpProxyFactory
+    public class RpcProxyFactory
     {
-        public static T Create<T>()
-        {
-            // return an DynamicObject which traps and redirects all method invocations, serialises the args and calls an API before returning the result
-            var targetType = typeof(T);
-            dynamic proxyObject = new ProxyObject(targetType);
-            T result = Impromptu.ActLike(proxyObject);
+        private readonly IDictionaryCache<Type, ProxyObject> _proxyObjectCache = new DictionaryCache<Type,ProxyObject>();
 
-            return result;
+        public T Create<T>()
+        {
+            var targetType = typeof(T);
+            
+            T proxyObject = _proxyObjectCache.Fetch(targetType, () => {
+                dynamic proxyObject = new ProxyObject(targetType);
+                return proxyObject;
+            }).ActLike();
+
+            return proxyObject;
         }
     }
 
     public class ProxyObject : DynamicObject
     {
         private readonly Type _type;
+
+        private readonly IDictionaryCache<string, MethodInfo> _methodInfoCache = new DictionaryCache<string, MethodInfo>();
+
         public ProxyObject(Type type)
         {
             _type = type;
@@ -30,7 +38,7 @@ namespace reflectorRPC.Client
         {
             try
             {
-                var targetMethodInfo = _type.GetMethod(binder.Name) ??
+                var targetMethodInfo = _methodInfoCache.Fetch($"{_type.Name}.{binder.Name}", () => _type.GetMethod(binder.Name)) ??
                                        throw new ApplicationException($"Cant find method named {binder.Name} on the Type named {_type.Name}");
                 
                 var requestContent = new RpcRequestContent
@@ -38,11 +46,10 @@ namespace reflectorRPC.Client
                     TypeName = _type.Name,
                     AssemblyQualifiedTypeName = _type.AssemblyQualifiedName ?? _type.Name,
                     MethodName = binder.Name,
-                    MethodReturnsTask = MethodReturnsTask(targetMethodInfo),
                     Args = args?.ToList()
                 };
 
-                var rpcClientService = new RpcClientService();
+                var rpcClientService = new RpcClientService(); // TODO use IoC to get this
 
                 var responseContent = rpcClientService.CallRemoteMethodAsync(requestContent).Result;
 
